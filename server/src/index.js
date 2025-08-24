@@ -72,7 +72,7 @@ const issueCreateSchema = z.object({
 const issueUpdateSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().min(1).optional(),
-  status: z.enum(['OPEN','CLOSED']).optional()
+  status: z.enum(['OPEN', 'CLOSED']).optional()
 })
 
 const commentCreateSchema = z.object({
@@ -237,6 +237,53 @@ app.post('/issues/:id/comments', auth(true), async (req, res) => {
   res.status(201).json(comment)
 })
 
+// SSE and /health endpoints addition
+// Health endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// In-memory storage for SSE clients per issue
+if (!global.clients) {
+  global.clients = {};
+}
+
+// SSE endpoint for notifications
+app.get('/notifications/:issueId', (req, res) => {
+  const { issueId } = req.params;
+  // Set headers for SSE
+  req.socket.setTimeout(0);
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.flushHeaders();
+
+  const clientId = Date.now();
+  const newClient = { id: clientId, res };
+  global.clients[issueId] = global.clients[issueId] || [];
+  global.clients[issueId].push(newClient);
+
+  req.on('close', () => {
+    global.clients[issueId] = global.clients[issueId].filter(client => client.id !== clientId);
+  });
+});
+
+// Endpoint to add a comment and notify clients
+app.post('/issues/:issueId/comments', (req, res) => {
+  const { issueId } = req.params;
+  const comment = req.body.comment;
+  // ...existing logic to store comment...
+
+  const data = `data: ${JSON.stringify({ comment })}\n\n`;
+  if (global.clients[issueId]) {
+    global.clients[issueId].forEach(client => client.res.write(data));
+  }
+
+  res.status(201).json({ success: true, comment });
+});
+
 // Global error handler (fallback)
 app.use((err, _req, res, _next) => {
   console.error(err)
@@ -246,3 +293,6 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`)
 })
+
+// Replace CommonJS export with ES module export
+export default app;

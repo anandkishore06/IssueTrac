@@ -5,6 +5,8 @@ export default function IssueDetail({ issueId, onBack }) {
   const [issue, setIssue] = useState(null)
   const [comments, setComments] = useState([])
   const [newComment, setNewComment] = useState('')
+  const [error, setError] = useState(null)
+  const [connected, setConnected] = useState(false)
 
   async function load() {
     const data = await api.getIssue(issueId)
@@ -46,11 +48,42 @@ export default function IssueDetail({ issueId, onBack }) {
     }
   }
 
+  useEffect(() => {
+    if (!issueId) return
+    let eventSource
+    const connectEventSource = () => {
+      eventSource = new EventSource(`/notifications/${issueId}`)
+      eventSource.onopen = () => {
+        setConnected(true)
+        setError(null)
+      }
+      eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data)
+          if (parsed.comment) {
+            setComments(prev => [...prev, parsed.comment])
+          }
+        } catch (error) {
+          console.error('Error parsing SSE message', error)
+        }
+      }
+      eventSource.onerror = (error) => {
+        setConnected(false)
+        setError('Connection lost. Reconnecting in 5 seconds...')
+        eventSource.close()
+        setTimeout(connectEventSource, 5000)
+      }
+    }
+
+    connectEventSource()
+
+    return () => {
+      if (eventSource) eventSource.close()
+    }
+  }, [issueId])
+
   if (!issue) return <div className="text-center p-8">Loading...</div>
 
-  // --- STYLE UPDATE ---
-  // The entire return block has been updated with new Tailwind CSS classes
-  // for a more modern and visually appealing design.
   return (
     <div className="p-4 sm:p-6 md:p-8 bg-white shadow-xl rounded-2xl max-w-3xl mx-auto">
       <button
@@ -66,8 +99,8 @@ export default function IssueDetail({ issueId, onBack }) {
           {issue.title}
         </h3>
         <span className={`px-3 py-1 text-xs font-bold rounded-full uppercase ${issue.status === 'OPEN'
-            ? 'bg-green-100 text-green-800'
-            : 'bg-red-100 text-red-800'
+          ? 'bg-green-100 text-green-800'
+          : 'bg-red-100 text-red-800'
           }`}>
           {issue.status}
         </span>
